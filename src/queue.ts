@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import type { Billing } from "./pricing.js";
+
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
 export interface SceneParams {
@@ -42,7 +44,10 @@ export interface Job {
   params: SceneParams;
   files: string[];
   attempts: number;
+  /** The credit quote Flow showed (kept for compatibility). Not a measured charge: see `billing`. */
   credits?: number;
+  /** Pricing evidence for paid generations: final verified quote, cap, balance before/after, measured charge. */
+  billing?: Billing;
   progress?: string;
   note?: string;
   error?: string;

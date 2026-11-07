@@ -250,6 +250,16 @@ key → Save key**. It's checked with Google before it's saved, and stored only 
 
 ---
 
+## Credit safety (final price check)
+
+Before it presses Start on a generation, flow-mcp re-reads the price Flow shows **after** the model settings, reference
+images/frames and prompt are all in place, and refuses (spending nothing) if that price is unreadable, above `max_credits`,
+or above your balance. Each job reports `billing` (final quote, balance before/after, measured charge). `flow_status` includes
+`pricing: "final-v1"` so clients can tell the check exists. `npm test` runs the unit tests for this logic.
+The charge is a measured balance change; Flow has no per-job billing record. Edit, agent and continue jobs have no quote to check.
+
+---
+
 ## Updating
 
 Tell your assistant: *"Update Flow MCP: in my flow-mcp folder, run git pull, then npm install, then npm run

@@ -4,6 +4,7 @@ import { basename, extname, join } from "node:path";
 import type { Locator, Page } from "playwright-core";
 import { HOME_DIR, getFlowPage, inEnglish } from "./chrome.js";
 import type { Job } from "./queue.js";
+import { newBilling, parseQuote, recordCharge, verifyFinalPrice } from "./pricing.js";
 import { extractZip } from "./platform.js";
 
 export interface FlowState {
@@ -372,12 +373,31 @@ async function applySettings(page: Page, job: Job): Promise<number> {
   if (s.type === "video" && s.duration) await pickRadio(page, `${s.duration}s`);
   await pickRadio(page, `x${s.variants ?? 1}`);
   await pause(page, 600);
-  const costText = await page.getByRole("link", { name: /credits?$/ }).innerText();
-  const cost = Number(costText.match(/\d+/)?.[0] ?? NaN);
+  const cost = await readQuoteNow(page);
   await page.keyboard.press("Escape");
   await pause(page, 400);
-  if (Number.isNaN(cost)) throw new Error(`Could not read the credit cost from Flow ("${costText}").`);
+  if (cost === undefined) throw new Error("Could not read the credit cost from Flow.");
   return cost;
+}
+
+// The price Flow shows for the composer as it is RIGHT NOW (the settings popover must be open). undefined when it is
+// missing, ambiguous (not exactly one match) or not a clean number: callers treat that as "price unknown", never as 0.
+async function readQuoteNow(page: Page): Promise<number | undefined> {
+  const link = page.getByRole("link", { name: /credits?$/ });
+  if ((await link.count()) !== 1) return undefined;
+  return parseQuote(await link.innerText());
+}
+
+// Re-reads the quote after every input is attached: reopens the settings popover, reads, closes it.
+async function readFinalQuote(page: Page): Promise<number | undefined> {
+  await openSettings(page);
+  try {
+    await pause(page, 600);
+    return await readQuoteNow(page);
+  } finally {
+    await page.keyboard.press("Escape").catch(() => {});
+    await pause(page, 400);
+  }
 }
 
 const ASSET_PREFIX = "asset:";
@@ -780,8 +800,13 @@ export async function runGeneration(job: Job): Promise<string[]> {
   const clear = page.getByRole("button", { name: "Clear prompt" });
   if (await clear.isVisible().catch(() => false)) await clear.click();
 
-  job.credits = await applySettings(page, job);
+  const billing = newBilling({ model: s.model, duration: s.duration, resolution: s.resolution, variants: s.variants, references: (s.reference_images ?? []).length + (s.first_frame ? 1 : 0) + (s.last_frame ? 1 : 0), cap: s.max_credits });
+  job.billing = billing;
+  job.credits = billing.quote_initial = await applySettings(page, job);
+  // Early, cheap exit only. This quote is NOT what authorises the spend: the final one, read after the references and
+  // prompt are in place, is (see verifyFinalPrice below).
   if (job.credits > s.max_credits) {
+    billing.blocked = `Flow quotes ${job.credits} credits for this scene, above max_credits=${s.max_credits}.`;
     throw new Error(
       `Flow quotes ${job.credits} credits for this scene, above max_credits=${s.max_credits}. Nothing was generated. Raise max_credits or pick a cheaper model/duration/variants.`,
     );
@@ -817,10 +842,24 @@ export async function runGeneration(job: Job): Promise<string[]> {
   if (!(await start.isEnabled())) throw new Error("Flow's Start generation button is disabled; the prompt or inputs were not accepted.");
   await scrollToTop(page);
   const before = await mediaIds(page);
+  // FINAL PRICE GATE: every input is attached and the prompt is typed. Re-read the price Flow will actually charge,
+  // and refuse to click Start unless it is readable, within the cap and within the balance.
+  await verifyFinalPrice(billing, { readQuote: () => readFinalQuote(page), readBalance: () => readCredits(page).catch(() => undefined) });
+  job.credits = billing.quote_final;
+  // The gate reopened and closed Flow's popover: confirm the composer still accepts the request before the click.
+  if (!(await start.isEnabled())) { billing.final_verified = false; billing.blocked = "Start generation became disabled after the final price check."; throw new Error("Flow's Start generation button became disabled after the final price check. Nothing was generated and nothing was spent."); }
   await start.click();
 
+  // From here money may have been spent: whatever happens next (finished, failed, timed out), record the balance change.
   const variants = s.variants ?? 1;
-  const fresh = await waitForNewMedia(page, before, variants, s.type === "image" ? IMAGE_TIMEOUT_MS : VIDEO_TIMEOUT_MS, job, s.type === "image" ? "image" : "video");
+  let fresh: string[];
+  try {
+    fresh = await waitForNewMedia(page, before, variants, s.type === "image" ? IMAGE_TIMEOUT_MS : VIDEO_TIMEOUT_MS, job, s.type === "image" ? "image" : "video");
+  } catch (e) {
+    recordCharge(billing, await readCredits(page).catch(() => undefined));
+    throw e;
+  }
+  recordCharge(billing, await readCredits(page).catch(() => undefined));
   job.progress = undefined;
 
   mkdirSync(s.output_dir, { recursive: true });

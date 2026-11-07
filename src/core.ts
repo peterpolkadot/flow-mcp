@@ -8,6 +8,7 @@ import { extractLastFrame } from "./chain.js";
 import { burnCaptions, captionedName, captionSetup, previewCaptions, transcribe } from "./captions.js";
 import { characterLook, createCharacter, downloadAsset, trashAsset, editCharacter, getFlowState, listAssets, listCharacters, rememberCharacter, runAgentBatch, runContinue, runEdit, runGeneration } from "./flow.js";
 import { JobQueue, type Job } from "./queue.js";
+import { PRICING_PROTOCOL } from "./pricing.js";
 import { BIN, COMPUTER, IS_MAC, IS_WIN, moveToBin } from "./platform.js";
 import { TECHNIQUES, techniqueById } from "./techniques.js";
 
@@ -265,7 +266,7 @@ export const shapes = {
 
 type Args<K extends keyof typeof shapes> = z.infer<z.ZodObject<(typeof shapes)[K]>>;
 
-export const jobView = ({ id, status, params, files, attempts, credits, progress, note, error, failed_scenes }: Job) => ({
+export const jobView = ({ id, status, params, files, attempts, credits, billing, progress, note, error, failed_scenes }: Job) => ({
   id,
   status,
   project: params.output_dir,
@@ -351,7 +352,7 @@ export class LocalCore implements Core {
 
   async status({ detailed }: Args<"status">) {
     const flow = await getFlowState(detailed && !this.queue.busy);
-    return { flow, pacing: this.queue.pausedReason, output_root: OUTPUT_ROOT, jobs: this.queue.list().map(jobView) };
+    return { flow, pacing: this.queue.pausedReason, pricing: PRICING_PROTOCOL, output_root: OUTPUT_ROOT, jobs: this.queue.list().map(jobView) };
   }
 
   async generate({ project, scenes }: Args<"generate">) {
