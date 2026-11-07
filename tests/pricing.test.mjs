@@ -1,6 +1,7 @@
 // Unit tests for the credit gate (no browser, no credits). Run: npm test  (builds first)
 import test from "node:test";
 import assert from "node:assert/strict";
+import { jobView } from "../dist/core.js";
 import { newBilling, parseQuote, recordCharge, verifyFinalPrice, PriceGateError, PRICING_PROTOCOL } from "../dist/pricing.js";
 
 // A tiny model of Flow's composer: the price depends on settings AND on how many references are attached.
@@ -85,3 +86,10 @@ test("the gate always re-reads: an earlier quote is never reused", async () => {
 });
 
 test("protocol marker", () => assert.equal(PRICING_PROTOCOL, "final-v1"));
+
+test("jobView exposes billing to clients (regression: it was dropped from the response)", () => {
+  const b = newBilling({ cap: 10 }); b.quote_final = 7; b.final_verified = true;
+  const v = jobView({ id: "x", status: "done", params: { output_dir: "o", file_stem: "s", prompt: "p" }, files: [], attempts: 1, credits: 7, billing: b });
+  assert.deepEqual(v.billing, b); assert.equal(v.billing.quote_final, 7);
+  assert.equal(JSON.parse(JSON.stringify(v)).billing.final_verified, true);
+});
