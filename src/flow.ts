@@ -795,7 +795,7 @@ export async function runGeneration(job: Job): Promise<string[]> {
   const s = job.params;
 
   await ensureProjectGrid(page);
-  const agent = page.getByRole("button", { name: "Agent", exact: true });
+  const agent = page.getByRole("button", { name: /^(Flow )?Agent$/ });
   if ((await agent.getAttribute("aria-pressed")) === "true") await agent.click();
   const clear = page.getByRole("button", { name: "Clear prompt" });
   if (await clear.isVisible().catch(() => false)) await clear.click();
@@ -1348,7 +1348,7 @@ export async function runEdit(job: Job): Promise<string[]> {
 // mode on then breaks the NEXT job, which expects the plain composer - a free character build failed that way. So this
 // confirms the toggle actually landed rather than assuming the click worked.
 async function setAgentMode(page: Page, on: boolean): Promise<void> {
-  const agent = page.getByRole("button", { name: "Agent", exact: true });
+  const agent = page.getByRole("button", { name: /^(Flow )?Agent$/ });
   // Playwright says why a click did not land ("<div ...> intercepts pointer events", "element is not visible"); keep
   // that, so a failure names what was in the way instead of guessing.
   let why = "";
@@ -1372,7 +1372,7 @@ async function setAgentSettings(page: Page, confirm: "Always" | "Never", imageAs
   // Scoped to the prompt box: Flow added a second "Settings" button to the top bar ("View settings", seen 2026-10-13),
   // and an unscoped lookup matched both and failed every agent batch.
   await clearBackdrops(page);
-  await page.locator("flow-base-prompt-box").getByRole("button", { name: "Settings", exact: true }).click();
+  await page.locator("flow-base-prompt-box").getByRole("button", { name: /^Settings( trigger)?$/ }).click();
   try {
     await page.getByRole("heading", { name: "Agent settings" }).waitFor({ state: "visible", timeout: 8000 });
     await page.getByRole("radio", { name: new RegExp(`^${confirm}`) }).click();
